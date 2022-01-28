@@ -127,18 +127,21 @@ def add_past_time_period_dumm(df,t,col,dum_col): # col must be list
 
 def preprocess_df2(df,cat=False,qty=False):
     cols = ["Itm_Code","Cus_CardNo","gap"]
+    past_cols = ["gap_scale"]
     if cat:
         cols = cols+["cat_x"]
     if qty:
-        cols = cols+[""]
+        cols = cols+["qty_x"]
+        past_cols = past_cols + ["qty_x"]
     df = df[cols]
     #df.loc[:,"gap_scale"] = df.gap.pct_change()
     df.dropna(inplace=True)
     df.loc[:,"gap_scale"] = preprocessing.scale(df.gap.values)
     df.dropna(inplace=True)
     for t in reversed(range (1,using_past+1)):
-        df = add_past_time_period(df, t, "gap_scale")
-    df = pd.get_dummies(df,columns=["cat_x"])
+        df = add_past_time_period(df, t, past_cols)
+    if cat:
+        df = pd.get_dummies(df,columns=["cat_x"])
     df.dropna(inplace=True)
     df = df.sample(frac = 1)
     return df
@@ -165,7 +168,7 @@ def simple_RNN(n_steps,n_features):
 
     model.add(Dense(1, activation='linear'))
     #model.compile(optimizer='adam', loss='mse', metric="mae")
-    opt = tf.keras.optimizers.Adam(lr=0.00001,clipvalue=,epsilon=1e-04)
+    opt = tf.keras.optimizers.Adam(lr=0.00001,clipvalue=1,epsilon=1e-04)
     model.compile(loss='mean_squared_error', optimizer= opt, metrics=['mae'])
     return model
 
@@ -182,7 +185,7 @@ gap_df, df = create_gap_df(df)
 df_merge = df.merge(gap_df, how="left",left_on=["Itm_Code","Cus_CardNo"],right_on=["Itm_Code","Cus_CardNo"])
 gap_df = gap_df.reset_index()
 
-df = preprocess_df2(df)
+df = preprocess_df2(df,qty=True)
 
 test , train = train_test_split(gap_df,df)
 
