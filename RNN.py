@@ -101,13 +101,13 @@ def preprocess_df(df):
     
     return X,y
 
-def add_past_time_period(df,t,col):
+def add_past_time_period(df,t,cols):
     df["index_copy"] = df.index # add copy of index that will be shifted by -t
     copy = df.copy()
     copy.index_copy = copy.index_copy - t # shifting index copy
-    copy = copy[[col,"Itm_Code", "Cus_CardNo","index_copy"]] # keep only target cols 
-    new_name = col+f'-{t}'
-    copy = copy.rename({col:new_name},axis=1)
+    columns = cols + ["Itm_Code", "Cus_CardNo","index_copy"]
+    copy = copy[columns] # keep only target cols 
+    copy[i] = list(copy[col].values)
     df = df.merge(copy,how='left',right_on=("Itm_Code", "Cus_CardNo","index_copy"),left_on=("Itm_Code", "Cus_CardNo","index_copy"))
     return df 
 
