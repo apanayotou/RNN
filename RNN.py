@@ -107,7 +107,8 @@ def add_past_time_period(df,t,cols):
     copy.index_copy = copy.index_copy - t # shifting index copy
     columns = cols + ["Itm_Code", "Cus_CardNo","index_copy"]
     copy = copy[columns] # keep only target cols 
-    copy[i] = list(copy[col].values)
+    copy[t] = list(copy[cols].values)
+    copy = copy.drop(columns=cols)
     df = df.merge(copy,how='left',right_on=("Itm_Code", "Cus_CardNo","index_copy"),left_on=("Itm_Code", "Cus_CardNo","index_copy"))
     return df 
 
@@ -127,16 +128,15 @@ def add_past_time_period_dumm(df,t,col,dum_col): # col must be list
 
 def preprocess_df2(df,cat=False,qty=False):
     cols = ["Itm_Code","Cus_CardNo","gap"]
-    past_cols = ["gap_scale"]
+    past_cols = ["gap"]
     if cat:
         cols = cols+["cat_x"]
     if qty:
         cols = cols+["qty_x"]
         past_cols = past_cols + ["qty_x"]
     df = df[cols]
-    #df.loc[:,"gap_scale"] = df.gap.pct_change()
     df.dropna(inplace=True)
-    df.loc[:,"gap_scale"] = preprocessing.scale(df.gap.values)
+    df.loc[:,past_cols] = preprocessing.scale(df[past_cols])
     df.dropna(inplace=True)
     for t in reversed(range (1,using_past+1)):
         df = add_past_time_period(df, t, past_cols)
@@ -191,8 +191,8 @@ test , train = train_test_split(gap_df,df)
 
 test = test.dropna()
 train = train.dropna()
-test_x = test.drop(["Itm_Code", "Cus_CardNo",  "gap", "gap_scale", "index_copy"],axis=1)
-train_x = train.drop(["Itm_Code", "Cus_CardNo",  "gap", "gap_scale", "index_copy"],axis=1)
+test_x = test.drop(["Itm_Code", "Cus_CardNo",  "gap", "index_copy"],axis=1)
+train_x = train.drop(["Itm_Code", "Cus_CardNo",  "gap", "index_copy"],axis=1)
 test_y = test["gap"].to_numpy()
 train_y = train["gap"].to_numpy()
 
