@@ -15,7 +15,7 @@ from sklearn.linear_model import LinearRegression
 from pandas.plotting import register_matplotlib_converters
 import matplotlib.pyplot as plt
 
-from sklearn.metrics import r2_score , mean_absolute_error
+from sklearn.metrics import r2_score , mean_absolute_error, mean_squared_error
 from sklearn import preprocessing
 import time
 import tensorflow as tf
@@ -71,7 +71,7 @@ def create_gap_df(df):
     new_df = df.merge(df_copy,how="inner",right_on=("Itm_Code", "Cus_CardNo","index_copy"),left_on=("Itm_Code", "Cus_CardNo","index_copy"))
     new_df["gap"] = new_df.Pos_TimeDate_x - new_df.Pos_TimeDate_y
     new_df.gap = new_df.gap.dt.days
-    gap_df = new_df.groupby(["Itm_Code", "Cus_CardNo"]).agg({"gap": [np.mean, np.median,'count'],"Pos_TimeDate_x":["max"]})
+    gap_df = new_df.groupby(["Itm_Code", "Cus_CardNo"]).agg({"gap": [np.mean, np.median,'count','max'],"Pos_TimeDate_x":["max"]})
     return gap_df, new_df
 
 
@@ -135,8 +135,10 @@ def preprocess_df2(df,cat=False,qty=False):
         cols = cols+["qty_x"]
         past_cols = past_cols + ["qty_x"]
     df = df[cols]
+    df["y"] = df.gap
     df.dropna(inplace=True)
-    df.loc[:,past_cols] = preprocessing.scale(df[past_cols])
+    for col in past_cols:
+        df.loc[:,col] = preprocessing.scale(df[col])
     df.dropna(inplace=True)
     for t in reversed(range (1,using_past+1)):
         df = add_past_time_period(df, t, past_cols)
@@ -164,17 +166,40 @@ def encoder_decoder(n_steps_in,n_features,n_steps_out):
 
 def simple_RNN(n_steps,n_features):
     model = Sequential()
-    model.add(Bidirectional(LSTM(50, activation='relu', input_shape=(n_steps, n_features))))
-
+    model.add(Bidirectional(LSTM(300, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
+    model.add(Dropout(0.2))
+    model.add(Bidirectional(LSTM(300, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
+    model.add(Dropout(0.2))
+    model.add(Bidirectional(LSTM(300, activation='relu', input_shape=(n_steps, n_features))))
     model.add(Dense(1, activation='linear'))
     #model.compile(optimizer='adam', loss='mse', metric="mae")
-    opt = tf.keras.optimizers.Adam(lr=0.00001,clipvalue=1,epsilon=1e-04)
+    opt = tf.keras.optimizers.Adam(lr=0.00001)
     model.compile(loss='mean_squared_error', optimizer= opt, metrics=['mae'])
     return model
 
+def outliers(df,col):
+    # Select the first quantile
+    q1 = df[col].quantile(.25)
+    
+    # Select the third quantile
+    q3 = df[col].quantile(.75)
+    
+    iqr = q3-q1
+    
+    lower_outliers = q1-(iqr*1.5)
+    upper_outliers = q3+(iqr*1.5)
+    return lower_outliers, upper_outliers
+
+def filter_outlier_custs(gap_df, df):
+    lower_outliers , upper_outliers = outliers(gap_df["gap"],"max")
+    outlier_custs = gap_df[gap_df["gap"]["max"] > upper_outliers].index.get_level_values(1)
+    df = df[~df.Cus_CardNo.isin(outlier_custs)]
+    return df
+
+
 predict_next = 1
 using_past = 15
-epochs = 500
+epochs = 100
 batch_size = 64
 name = f"predict-next-{predict_next}-using-{using_past}-at-{int(time.time())}"
 
@@ -182,6 +207,10 @@ df = pull_data(year=2021, start='2021-01-01', end ='2021-05-30')
 df_orig = df.copy
 
 gap_df, df = create_gap_df(df)
+
+df = filter_outlier_custs(gap_df,df)
+
+
 df_merge = df.merge(gap_df, how="left",left_on=["Itm_Code","Cus_CardNo"],right_on=["Itm_Code","Cus_CardNo"])
 gap_df = gap_df.reset_index()
 
@@ -191,20 +220,20 @@ test , train = train_test_split(gap_df,df)
 
 test = test.dropna()
 train = train.dropna()
-test_x = test.drop(["Itm_Code", "Cus_CardNo",  "gap", "index_copy"],axis=1)
-train_x = train.drop(["Itm_Code", "Cus_CardNo",  "gap", "index_copy"],axis=1)
-test_y = test["gap"].to_numpy()
-train_y = train["gap"].to_numpy()
+test_x = test.drop(["Itm_Code", "Cus_CardNo",  "gap", "index_copy","qty_x","y"],axis=1)
+train_x = train.drop(["Itm_Code", "Cus_CardNo",  "gap", "index_copy","qty_x","y"],axis=1)
+test_y = test["y"].to_numpy()
+train_y = train["y"].to_numpy()
 
 lim = 10000
 train_x = train_x[:lim]
 train_y = train_y[:lim]
 test_x = test_x[:lim]
 test_y = test_y[:lim]
-test_x_array = np.reshape(test_x.to_numpy(), (test_x.shape[0], test_x.shape[1], 1))
-train_x_array = np.reshape(train_x.to_numpy(), (train_x.shape[0], train_x.shape[1], 1))
+test_x_array = np.array(test_x.to_numpy().tolist()).astype('float32')
+train_x_array = np.array(train_x.to_numpy().tolist()).astype('float32')
 
-model = simple_RNN(test_x.shape[1],1)
+model = simple_RNN(test_x.shape[1],2)
 
 tenserboard = TensorBoard(log_dir=f'logs/{name}')
 
@@ -250,5 +279,16 @@ history = model.fit(train_x_array,
                     verbose=1,
                     validation_data=(test_x_array, test_y)
                     )
-               
-                    
+axes = plt.axes()
+#axes.set_ylim([0,20])
+axes.plot(history.history['loss'])
+axes.plot(history.history['val_loss'])
+plt.title('model loss')
+axes.ylabel('loss')
+axes.xlabel('epoch')
+axes.legend(['train', 'test'], loc='upper left')
+axes.show()
+
+y_pred = model.predict(train_x_array)
+
+plt.scatter(train_y,y_pred)
