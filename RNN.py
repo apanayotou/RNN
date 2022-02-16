@@ -51,10 +51,10 @@ def pull_data(year,start,end):
                 f'FROM [Ins_AMe].[dbo].[Ins_PosTransactions{year_str}] \n'
                 f"WHERE Pos_TimeDate >= '{start}' and  Pos_TimeDate <= '{end}' \n"
                 'GROUP BY Itm_Code, Cus_CardNo \n'
-                "HAVING Cus_CardNo <> '' AND count( distinct Pos_TimeDate) > 20 "
+                "HAVING Cus_CardNo <> '' AND count( distinct Pos_TimeDate) > 10 "
                 ") \n"
         f'GROUP BY [Ins_PosTransactions{year_str}].Itm_Code, Cus_CardNo, Pos_TimeDate \n'
-        "HAVING Cus_CardNo <> '' "
+        f"HAVING Cus_CardNo <> '' and  [Ins_PosTransactions{year_str}].Itm_Code <> '834477' "
         )
     db.select_db_data(query)
     db.close_conn()
@@ -166,11 +166,11 @@ def encoder_decoder(n_steps_in,n_features,n_steps_out):
 
 def simple_RNN(n_steps,n_features):
     model = Sequential()
-    model.add(Bidirectional(LSTM(300, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
+    model.add(Bidirectional(LSTM(50, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
     model.add(Dropout(0.2))
-    model.add(Bidirectional(LSTM(300, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
+    model.add(Bidirectional(LSTM(50, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
     model.add(Dropout(0.2))
-    model.add(Bidirectional(LSTM(300, activation='relu', input_shape=(n_steps, n_features))))
+    model.add(Bidirectional(LSTM(50, activation='relu', input_shape=(n_steps, n_features))))
     model.add(Dense(1, activation='linear'))
     #model.compile(optimizer='adam', loss='mse', metric="mae")
     opt = tf.keras.optimizers.Adam(lr=0.00001)
@@ -197,15 +197,19 @@ def filter_outlier_custs(gap_df, df):
     return df
 
 
+
 predict_next = 1
-using_past = 15
-epochs = 100
+using_past = 25
+epochs = 2000
 batch_size = 64
 name = f"predict-next-{predict_next}-using-{using_past}-at-{int(time.time())}"
 
-df = pull_data(year=2021, start='2021-01-01', end ='2021-05-30')
-df_orig = df.copy
+df = pull_data(year=2021, start='2021-01-01', end ='2021-03-30')
+df_orig = df.copy()
 
+df_cat = df.groupby(["Pos_TimeDate","cat","Cus_CardNo"]).sum().reset_index()
+
+df = df[df.Itm_Code=='901994']
 gap_df, df = create_gap_df(df)
 
 df = filter_outlier_custs(gap_df,df)
@@ -214,7 +218,10 @@ df = filter_outlier_custs(gap_df,df)
 df_merge = df.merge(gap_df, how="left",left_on=["Itm_Code","Cus_CardNo"],right_on=["Itm_Code","Cus_CardNo"])
 gap_df = gap_df.reset_index()
 
+
 df = preprocess_df2(df,qty=True)
+
+
 
 test , train = train_test_split(gap_df,df)
 
@@ -225,11 +232,11 @@ train_x = train.drop(["Itm_Code", "Cus_CardNo",  "gap", "index_copy","qty_x","y"
 test_y = test["y"].to_numpy()
 train_y = train["y"].to_numpy()
 
-lim = 10000
-train_x = train_x[:lim]
-train_y = train_y[:lim]
-test_x = test_x[:lim]
-test_y = test_y[:lim]
+#lim = 10000
+#train_x = train_x[:lim]
+#train_y = train_y[:lim]
+#test_x = test_x[:lim]
+#test_y = test_y[:lim]
 test_x_array = np.array(test_x.to_numpy().tolist()).astype('float32')
 train_x_array = np.array(train_x.to_numpy().tolist()).astype('float32')
 
@@ -284,10 +291,10 @@ axes = plt.axes()
 axes.plot(history.history['loss'])
 axes.plot(history.history['val_loss'])
 plt.title('model loss')
-axes.ylabel('loss')
-axes.xlabel('epoch')
-axes.legend(['train', 'test'], loc='upper left')
-axes.show()
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'], loc='upper left')
+plt.show()
 
 y_pred = model.predict(train_x_array)
 
