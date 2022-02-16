@@ -62,22 +62,22 @@ def pull_data(year,start,end):
     return df
 
 def create_gap_df(df):
-    df = df.sort_values(["Cus_CardNo","Itm_Code","Pos_TimeDate"],ascending=[True,True,False])
+    df = df.sort_values(["Cus_CardNo","cat","Pos_TimeDate"],ascending=[True,True,False])
     df = df.reset_index(drop=True)
     df_copy = df.copy()
     df_copy.index = df_copy.index-1
     df_copy["index_copy"] = df_copy.index
     df["index_copy"] = df.index
-    new_df = df.merge(df_copy,how="inner",right_on=("Itm_Code", "Cus_CardNo","index_copy"),left_on=("Itm_Code", "Cus_CardNo","index_copy"))
+    new_df = df.merge(df_copy,how="inner",right_on=("cat", "Cus_CardNo","index_copy"),left_on=("cat", "Cus_CardNo","index_copy"))
     new_df["gap"] = new_df.Pos_TimeDate_x - new_df.Pos_TimeDate_y
     new_df.gap = new_df.gap.dt.days
-    gap_df = new_df.groupby(["Itm_Code", "Cus_CardNo"]).agg({"gap": [np.mean, np.median,'count','max'],"Pos_TimeDate_x":["max"]})
+    gap_df = new_df.groupby(["cat", "Cus_CardNo"]).agg({"gap": [np.mean, np.median,'count','max'],"Pos_TimeDate_x":["max"]})
     return gap_df, new_df
 
 
 def preprocess_df(df):
     #36.55 sec for 10000
-    df = df[["Itm_Code","Cus_CardNo","gap"]]
+    df = df[["cat","Cus_CardNo","gap"]]
     X = []
     y = [] 
     df.loc[:,"gap_scale"] = df.gap.pct_change()
@@ -87,8 +87,8 @@ def preprocess_df(df):
     n=0
     for i in df.index: 
         print(n-len(df))
-        itm, cust, gap = df.loc[i,["Itm_Code","Cus_CardNo","gap"]]
-        array = df[(df.Itm_Code==itm) & (df.Cus_CardNo==cust)]
+        itm, cust, gap = df.loc[i,["cat","Cus_CardNo","gap"]]
+        array = df[(df.cat==itm) & (df.Cus_CardNo==cust)]
 
         array = array.loc[i+predict_next:i+using_past,"gap_scale"].to_list()
         
@@ -105,29 +105,29 @@ def add_past_time_period(df,t,cols):
     df["index_copy"] = df.index # add copy of index that will be shifted by -t
     copy = df.copy()
     copy.index_copy = copy.index_copy - t # shifting index copy
-    columns = cols + ["Itm_Code", "Cus_CardNo","index_copy"]
+    columns = cols + ["cat", "Cus_CardNo","index_copy"]
     copy = copy[columns] # keep only target cols 
     copy[t] = list(copy[cols].values)
     copy = copy.drop(columns=cols)
-    df = df.merge(copy,how='left',right_on=("Itm_Code", "Cus_CardNo","index_copy"),left_on=("Itm_Code", "Cus_CardNo","index_copy"))
+    df = df.merge(copy,how='left',right_on=("cat", "Cus_CardNo","index_copy"),left_on=("cat", "Cus_CardNo","index_copy"))
     return df 
 
 def add_past_time_period_dumm(df,t,col,dum_col): # col must be list
     df["index_copy"] = df.index # add copy of index that will be shifted by -t
     copy = df.copy()
     copy.index_copy = copy.index_copy - t # shifting index copy
-    copy = copy[[copy,dum_col,"Itm_Code", "Cus_CardNo","index_copy"]] # keep only target cols 
+    copy = copy[[copy,dum_col,"cat", "Cus_CardNo","index_copy"]] # keep only target cols 
     dummies = pd.get_dummies(df[dum_col])
     dummies_cols = dummies.columns()
     copy = copy.merge(dummies,left_index=True, right_index=True)
     new_name = col+f'-{t}'
     copy = copy.rename({col:new_name},axis=1)
-    df = df.merge(copy,how='left',right_on=("Itm_Code", "Cus_CardNo","index_copy"),left_on=("Itm_Code", "Cus_CardNo","index_copy"))
+    df = df.merge(copy,how='left',right_on=("cat", "Cus_CardNo","index_copy"),left_on=("cat", "Cus_CardNo","index_copy"))
     return df 
 
 
 def preprocess_df2(df,cat=False,qty=False):
-    cols = ["Itm_Code","Cus_CardNo","gap"]
+    cols = ["cat","Cus_CardNo","gap"]
     past_cols = ["gap"]
     if cat:
         cols = cols+["cat_x"]
@@ -149,10 +149,10 @@ def preprocess_df2(df,cat=False,qty=False):
     return df
 
 def train_test_split(gap_df,df,frac=0.05):
-    test_ic = gap_df[["Itm_Code","Cus_CardNo"]].sample(frac=frac)
-    train_ic = gap_df[["Itm_Code","Cus_CardNo"]].drop(test_ic.index, errors="ignore")
-    test = df[(df.Itm_Code.isin(test_ic.Itm_Code)) & (df.Cus_CardNo.isin(test_ic.Cus_CardNo))]
-    train = df[(df.Itm_Code.isin(train_ic.Itm_Code)) & (df.Cus_CardNo.isin(train_ic.Cus_CardNo))]
+    test_ic = gap_df[["cat","Cus_CardNo"]].sample(frac=frac)
+    train_ic = gap_df[["cat","Cus_CardNo"]].drop(test_ic.index, errors="ignore")
+    test = df[(df.cat.isin(test_ic.cat)) & (df.Cus_CardNo.isin(test_ic.Cus_CardNo))]
+    train = df[(df.cat.isin(train_ic.cat)) & (df.Cus_CardNo.isin(train_ic.Cus_CardNo))]
     return test, train
 
 def encoder_decoder(n_steps_in,n_features,n_steps_out):
@@ -207,15 +207,15 @@ name = f"predict-next-{predict_next}-using-{using_past}-at-{int(time.time())}"
 df = pull_data(year=2021, start='2021-01-01', end ='2021-03-30')
 df_orig = df.copy()
 
-df_cat = df.groupby(["Pos_TimeDate","cat","Cus_CardNo"]).sum().reset_index()
+df = df.groupby(["Pos_TimeDate","cat","Cus_CardNo"]).sum().reset_index()
 
-df = df[df.Itm_Code=='901994']
+#df = df[df.cat=='D40']
 gap_df, df = create_gap_df(df)
 
 df = filter_outlier_custs(gap_df,df)
 
 
-df_merge = df.merge(gap_df, how="left",left_on=["Itm_Code","Cus_CardNo"],right_on=["Itm_Code","Cus_CardNo"])
+df_merge = df.merge(gap_df, how="left",left_on=["cat","Cus_CardNo"],right_on=["cat","Cus_CardNo"])
 gap_df = gap_df.reset_index()
 
 
@@ -227,8 +227,8 @@ test , train = train_test_split(gap_df,df)
 
 test = test.dropna()
 train = train.dropna()
-test_x = test.drop(["Itm_Code", "Cus_CardNo",  "gap", "index_copy","qty_x","y"],axis=1)
-train_x = train.drop(["Itm_Code", "Cus_CardNo",  "gap", "index_copy","qty_x","y"],axis=1)
+test_x = test.drop(["cat", "Cus_CardNo",  "gap", "index_copy","qty_x","y"],axis=1)
+train_x = train.drop(["cat", "Cus_CardNo",  "gap", "index_copy","qty_x","y"],axis=1)
 test_y = test["y"].to_numpy()
 train_y = train["y"].to_numpy()
 
@@ -296,6 +296,6 @@ plt.xlabel('epoch')
 plt.legend(['train', 'test'], loc='upper left')
 plt.show()
 
-y_pred = model.predict(train_x_array)
+y_pred = model.predict(test_x_array)
 
-plt.scatter(train_y,y_pred)
+plt.scatter(test_y,y_pred)
