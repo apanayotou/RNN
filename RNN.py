@@ -166,11 +166,11 @@ def encoder_decoder(n_steps_in,n_features,n_steps_out):
 
 def simple_RNN(n_steps,n_features):
     model = Sequential()
-    model.add(Bidirectional(LSTM(50, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
+    model.add(Bidirectional(LSTM(150, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
     model.add(Dropout(0.2))
-    model.add(Bidirectional(LSTM(50, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
+    model.add(Bidirectional(LSTM(150, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
     model.add(Dropout(0.2))
-    model.add(Bidirectional(LSTM(50, activation='relu', input_shape=(n_steps, n_features))))
+    model.add(Bidirectional(LSTM(150, activation='relu', input_shape=(n_steps, n_features))))
     model.add(Dense(1, activation='linear'))
     #model.compile(optimizer='adam', loss='mse', metric="mae")
     opt = tf.keras.optimizers.Adam(lr=0.00001)
@@ -200,19 +200,27 @@ def filter_outlier_custs(gap_df, df):
 
 predict_next = 1
 using_past = 25
-epochs = 2000
+epochs = 1000
 batch_size = 64
 name = f"predict-next-{predict_next}-using-{using_past}-at-{int(time.time())}"
+filter_outlier = False
+load_from_db = False
 
-df = pull_data(year=2021, start='2021-01-01', end ='2021-03-30')
-df_orig = df.copy()
+if load_from_db:
+    df = pull_data(year=2021, start='2021-01-01', end ='2021-03-30')
+    df = df.groupby(["Pos_TimeDate","cat","Cus_CardNo"]).sum().reset_index()
+    df = df[df.cat!='$  ']
+    df_grouped = df.groupby("cat").nunique()
+   
+else:
+    df = pd.load_csv("cat_data.csv")
 
-df = df.groupby(["Pos_TimeDate","cat","Cus_CardNo"]).sum().reset_index()
+cats_to_keep = df_grouped[df_grouped.Cus_CardNo>20].index
 
-#df = df[df.cat=='D40']
+df = df[df.cat.isin(cats_to_keep)]
 gap_df, df = create_gap_df(df)
 
-df = filter_outlier_custs(gap_df,df)
+#df = filter_outlier_custs(gap_df,df)
 
 
 df_merge = df.merge(gap_df, how="left",left_on=["cat","Cus_CardNo"],right_on=["cat","Cus_CardNo"])
@@ -242,7 +250,7 @@ train_x_array = np.array(train_x.to_numpy().tolist()).astype('float32')
 
 model = simple_RNN(test_x.shape[1],2)
 
-tenserboard = TensorBoard(log_dir=f'logs/{name}')
+
 
 filepath = "RNN_Final-{epoch:02d}-{mae:.3f}"  # unique file name that will include the epoch and the validation acc for that epoch
 checkpoint = ModelCheckpoint("models/{}.model".format(filepath, monitor='val_acc', verbose=1, save_best_only=True, mode='max')) # saves only the best ones
@@ -287,7 +295,7 @@ history = model.fit(train_x_array,
                     validation_data=(test_x_array, test_y)
                     )
 axes = plt.axes()
-#axes.set_ylim([0,20])
+#axes.set_ylim([1,3])
 axes.plot(history.history['loss'])
 axes.plot(history.history['val_loss'])
 plt.title('model loss')
@@ -296,6 +304,11 @@ plt.xlabel('epoch')
 plt.legend(['train', 'test'], loc='upper left')
 plt.show()
 
-y_pred = model.predict(test_x_array)
+y_pred = model.predict(train_x_array)
 
-plt.scatter(test_y,y_pred)
+plt.scatter(train_y,y_pred)
+
+
+
+
+
