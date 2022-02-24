@@ -25,12 +25,32 @@ from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint
 from sklearn.metrics import r2_score
 
 
-# insert at 1, 0 is the script path (or '' in REPL)
-sys.path.insert(1, 'C:/Users/alexp/Desktop/Work/Other/Useful/alphamega_db_classes')
 
-import alphamega_db_classes as adb
+def pull_data(year,start,end,min_visits=10, groupby="cat"):
+    '''
+    Imports the Alphamega database classes used for quering the database.
+    Then creates the sql query using the start and end date 
 
-def pull_data(year,start,end):
+    Parameters
+    ----------
+    year : int
+        Year you want the data from.
+    start : str
+        Start of date. Date Format: 'YYYY-MM-DD'
+    end : str
+        End of date. Date Format: 'YYYY-MM-DD'
+    min_visits: int
+        Min number of visits per item customer pair.
+        
+    Returns
+    -------
+    df : Pandas DataFrame
+        DESCRIPTION.
+
+    '''
+    sys.path.insert(1, 'C:/Users/alexp/Desktop/Work/Other/Useful/alphamega_db_classes')
+    import alphamega_db_classes as adb
+    
     if year%2 == 0:
         year1 = year
         year2 = year+1
@@ -40,22 +60,28 @@ def pull_data(year,start,end):
     year_str = f'{year1}_{year2}'
     db = adb.insight_sql_querier("Ins_AMe")
     db.open_conn()
-    query = (
-        'SELECT  \n'
-            f'[Ins_PosTransactions{year_str}].Itm_Code, Cus_CardNo, Pos_TimeDate , sum([Pos_Quantity]) as qty , MAX([ICa_3DCode]) AS  cat \n'
-        f'FROM [Ins_AMe].[dbo].[Ins_PosTransactions{year_str}] \n'
-        f'LEFT JOIN [Ins_Item] ON [Ins_Item].Itm_Code = [Ins_PosTransactions{year_str}].Itm_Code \n'
-            f"WHERE Pos_TimeDate >= '{start}' and  Pos_TimeDate <= '{end}' and \n"
-            f'concat([Ins_PosTransactions{year_str}].Itm_Code, Cus_CardNo) IN ( \n'
-                'SELECT concat(Itm_Code, Cus_CardNo) \n'
-                f'FROM [Ins_AMe].[dbo].[Ins_PosTransactions{year_str}] \n'
-                f"WHERE Pos_TimeDate >= '{start}' and  Pos_TimeDate <= '{end}' \n"
-                'GROUP BY Itm_Code, Cus_CardNo \n'
-                "HAVING Cus_CardNo <> '' AND count( distinct Pos_TimeDate) > 10 "
-                ") \n"
-        f'GROUP BY [Ins_PosTransactions{year_str}].Itm_Code, Cus_CardNo, Pos_TimeDate \n'
-        f"HAVING Cus_CardNo <> '' and  [Ins_PosTransactions{year_str}].Itm_Code <> '834477' "
-        )
+    query = (f"""
+        SELECT
+            Cus_CardNo, 
+            Pos_TimeDate , 
+            sum([Pos_Quantity]) as qty , 
+            [ICa_3DCode] AS  cat
+        FROM [Ins_AMe].[dbo].[Ins_PosTransactions{year_str}]
+        LEFT JOIN [Ins_Item] ON [Ins_Item].Itm_Code = [Ins_PosTransactions{year_str}].Itm_Code
+            WHERE Pos_TimeDate >= '{start}' and  Pos_TimeDate <= '{end}' AND
+            concat(ICa_3DCode, Cus_CardNo) IN ( 
+                SELECT concat(ICa_3DCode, Cus_CardNo)
+                FROM [Ins_AMe].[dbo].[Ins_PosTransactions{year_str}]
+				LEFT JOIN [Ins_Item] ON [Ins_Item].Itm_Code = [Ins_PosTransactions{year_str}].Itm_Code
+                WHERE Pos_TimeDate >= '{start}' and  Pos_TimeDate <= '{end}'
+                GROUP BY ICa_3DCode, Cus_CardNo
+                HAVING Cus_CardNo <> '' AND count(distinct Pos_TimeDate) >= 10 
+                )
+        GROUP BY ICa_3DCode, Cus_CardNo, Pos_TimeDate
+        HAVING Cus_CardNo <> '' and  ICa_3DCode<> '969'             
+             
+        """)
+        
     db.select_db_data(query)
     db.close_conn()
     df = db.get_data().copy()    
@@ -75,31 +101,7 @@ def create_gap_df(df):
     return gap_df, new_df
 
 
-def preprocess_df(df):
-    #36.55 sec for 10000
-    df = df[["cat","Cus_CardNo","gap"]]
-    X = []
-    y = [] 
-    df.loc[:,"gap_scale"] = df.gap.pct_change()
-    df.dropna(inplace=True)
-    df.gap_scale = preprocessing.scale(df.gap_scale.values)
-    df.dropna(inplace=True)
-    n=0
-    for i in df.index: 
-        print(n-len(df))
-        itm, cust, gap = df.loc[i,["cat","Cus_CardNo","gap"]]
-        array = df[(df.cat==itm) & (df.Cus_CardNo==cust)]
 
-        array = array.loc[i+predict_next:i+using_past,"gap_scale"].to_list()
-        
-        if len(array)<10:
-            pass
-        else:
-            X.append(array)
-            y.append(gap)
-        n+=1
-    
-    return X,y
 
 def add_past_time_period(df,t,cols):
     df["index_copy"] = df.index # add copy of index that will be shifted by -t
@@ -166,11 +168,11 @@ def encoder_decoder(n_steps_in,n_features,n_steps_out):
 
 def simple_RNN(n_steps,n_features):
     model = Sequential()
-    model.add(Bidirectional(LSTM(150, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
+    model.add(Bidirectional(LSTM(50, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
     model.add(Dropout(0.2))
-    model.add(Bidirectional(LSTM(150, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
+    model.add(Bidirectional(LSTM(50, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
     model.add(Dropout(0.2))
-    model.add(Bidirectional(LSTM(150, activation='relu', input_shape=(n_steps, n_features))))
+    model.add(Bidirectional(LSTM(50, activation='relu', input_shape=(n_steps, n_features))))
     model.add(Dense(1, activation='linear'))
     #model.compile(optimizer='adam', loss='mse', metric="mae")
     opt = tf.keras.optimizers.Adam(lr=0.00001)
@@ -197,23 +199,29 @@ def filter_outlier_custs(gap_df, df):
     return df
 
 
-
+# fixed paramaters
 predict_next = 1
 using_past = 25
-epochs = 1000
+epochs = 500
 batch_size = 64
 name = f"predict-next-{predict_next}-using-{using_past}-at-{int(time.time())}"
 filter_outlier = False
 load_from_db = False
 
+# loads data from alphamega database
 if load_from_db:
     df = pull_data(year=2021, start='2021-01-01', end ='2021-03-30')
+    # grouping by category
     df = df.groupby(["Pos_TimeDate","cat","Cus_CardNo"]).sum().reset_index()
+    # removing blank category
     df = df[df.cat!='$  ']
-    df_grouped = df.groupby("cat").nunique()
-   
+    df.to_csv("cat_data.csv",index=False)
+    
+# Loads data from csv
 else:
-    df = pd.load_csv("cat_data.csv")
+    df = pd.read_csv("cat_data.csv",parse_dates=["Pos_TimeDate"])
+
+df_grouped = df.groupby("cat").nunique()
 
 cats_to_keep = df_grouped[df_grouped.Cus_CardNo>20].index
 
@@ -304,9 +312,12 @@ plt.xlabel('epoch')
 plt.legend(['train', 'test'], loc='upper left')
 plt.show()
 
-y_pred = model.predict(train_x_array)
+y_pred = model.predict(test_x_array)
 
-plt.scatter(train_y,y_pred)
+#axes = plt.axes()
+#axes.set_ylim([0,10])
+#axes.set_xlim([0,10])
+plt.scatter(test_y,y_pred)
 
 
 
