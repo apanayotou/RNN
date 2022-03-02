@@ -298,7 +298,7 @@ def filter_cat_by_amount_cust(df, min_cust=20):
 # fixed paramaters
 predict_next = 1
 using_past = 25
-epochs = 1
+epochs = 500
 batch_size = 64
 name = f"predict-next-{predict_next}-using-{using_past}-at-{int(time.time())}"
 filter_outlier = False
@@ -321,7 +321,7 @@ df = filter_cat_by_amount_cust(df,20)
 
 gap_df, df = create_gap_df(df)
 
-df = filter_outlier_custs(gap_df,df)
+#df = filter_outlier_custs(gap_df,df)
 
 df_merge = df.merge(gap_df, how="left",left_on=["cat","Cus_CardNo"],right_on=["cat","Cus_CardNo"])
 
@@ -333,7 +333,7 @@ test_x_array, test_y, train_x_array, train_y = train_test_split(gap_df,df)
 
 #model = simple_RNN(using_past,2)
 
-model = RNN([50,50,50],using_past,2,dropout=0.2,lr=0.0001)
+model = RNN([20,20,20,20,20,20,20],using_past,2,dropout=0.2,lr=0.0001)
 
 history = model.fit(train_x_array, 
                     train_y, 
@@ -344,8 +344,8 @@ history = model.fit(train_x_array,
                     )
 plot_loss_graph(history)
 
-y_pred = model.predict(test_x_array)
+y_pred = model.predict(train_x_array)
 
-plt.scatter(test_y,y_pred)
+plt.scatter(train_y,y_pred)
 
 
