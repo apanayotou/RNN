@@ -8,21 +8,16 @@ Created on Thu Jan 20 11:03:53 2022
 
 import sys
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
-from scipy import stats
 import numpy as np
-from sklearn.linear_model import LinearRegression
-from pandas.plotting import register_matplotlib_converters
-import matplotlib.pyplot as plt
 
-from sklearn.metrics import r2_score , mean_absolute_error, mean_squared_error
+import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score
 from sklearn import preprocessing
 import time
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, LSTM, BatchNormalization, Bidirectional, RepeatVector, TimeDistributed
-from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint
-from sklearn.metrics import r2_score
+from tensorflow.keras import regularizers
 
 
 
@@ -51,11 +46,11 @@ def pull_data(year,start,end,min_visits=10, groupby="cat"):
         Dataframe that has every customer cat pair within the date range greater than the min_visits
 
     '''
-    
+
     # Adds path where alpha
     sys.path.insert(1, 'C:/Users/alexp/Desktop/Work/Other/Useful/alphamega_db_classes')
     import alphamega_db_classes as adb
-    
+
     if year%2 == 0:
         year1 = year
         year2 = year+1
@@ -86,70 +81,133 @@ def pull_data(year,start,end,min_visits=10, groupby="cat"):
         HAVING Cus_CardNo <> '' and  ICa_3DCode<> '969'             
              
         """)
-        
+
     db.select_db_data(query)
     db.close_conn()
-    df = db.get_data().copy()    
+    df = db.get_data().copy()
     return df
 
-def create_gap_df(df):
+def filter_cat_by_amount_cust(df, min_cust=20):
     '''
-    Calculates the gap from
+    Filters out categories where the number of customers is less than
+    the min_cust.
 
     Parameters
     ----------
-    df : TYPE
-        DESCRIPTION.
+    df : Pandas Dataframe
+        Data frame with cat and customers columns.
+    min_cust : TYPE, optional
+        The min number of customers who purchased each category. The default is 20.
 
     Returns
     -------
-    gap_df : TYPE
-        DESCRIPTION.
+    df : Pandas Dataframe
+        Same Dataframe as input but with only cats with enough customer purchases
+
+    '''
+    # groups the dataframe by cat and gets the unique count of other columns
+    df_grouped = df.groupby("cat").nunique()
+    # filters the group df by the min_cust and save the index of cat ids
+    cats_to_keep = df_grouped[df_grouped.Cus_CardNo>min_cust].index
+    # filter the main df using the cats_to_keep
+    df = df[df.cat.isin(cats_to_keep)]
+    return df
+
+
+def create_gap_df(df):
+    '''
+    Calculates the gap between each customer's purchase of a category and the previous purchase of that category.
+    This is done by sorting the dataframe so every transaction of a given customer and category followed by the previous transaction.
+    Then the dataframe is duplicated and the index is offset by -1. 
+    The two dataframes are mergered on index, category and customer.
+    This gives each row a column with data purchase and previous date purchased.
+    Lastly these two columns are subtracted to get the number of days between purchases.
+    
+    Parameters
+    ----------
+    df : Pandas Dataframe
+        Transactionsal data for eavery=
+
+    Returns
+    -------
     new_df : TYPE
         DESCRIPTION.
 
     '''
+    # Sort values to have all transactions of the same customer and category are together and sorted in decending date order.
     df = df.sort_values(["Cus_CardNo","cat","Pos_TimeDate"],ascending=[True,True,False])
+    # reset index 
     df = df.reset_index(drop=True)
+    # duplicated dataframe
     df_copy = df.copy()
+    # subtract 1 from duplicated dataframe
     df_copy.index = df_copy.index-1
+    # make index a column in both dfs so we can use it to merge
     df_copy["index_copy"] = df_copy.index
     df["index_copy"] = df.index
+
+    # merging both df and its copy on cat cust and index to make new_df. 
+    # new_df has two date colomns now and because index is shifted and df is sorted, 
+    # date from old df will have be current date and date from copy will have previous date.
     new_df = df.merge(df_copy,how="inner",right_on=("cat", "Cus_CardNo","index_copy"),left_on=("cat", "Cus_CardNo","index_copy"))
+
+    # Subtrace current with previous date to get gap
     new_df["gap"] = new_df.Pos_TimeDate_x - new_df.Pos_TimeDate_y
+    # format to show gap in days.
     new_df.gap = new_df.gap.dt.days
-    gap_df = new_df.groupby(["cat", "Cus_CardNo"]).agg({"gap": [np.mean, np.median,'count','max'],"Pos_TimeDate_x":["max"]})
-    return gap_df, new_df
 
-
+    return new_df
 
 
 def add_past_time_period(df,t,cols):
+    '''
+    Adds a column to df. This column contains a list of factors from time period [current_date - t]
+    This is done using the same method as add_gap: copy df, shift index by -t, add cols data from that 
+    Parameters
+    ----------
+    df : TYPE
+        DESCRIPTION.
+    t : TYPE
+        DESCRIPTION.
+    cols : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    df : TYPE
+        DESCRIPTION.
+    '''
+    
     df["index_copy"] = df.index # add copy of index that will be shifted by -t
     copy = df.copy()
     copy.index_copy = copy.index_copy - t # shifting index copy
     columns = cols + ["cat", "Cus_CardNo","index_copy"]
-    copy = copy[columns] # keep only target cols 
+    copy = copy[columns] # keep only target cols
     copy[t] = list(copy[cols].values)
     copy = copy.drop(columns=cols)
     df = df.merge(copy,how='left',right_on=("cat", "Cus_CardNo","index_copy"),left_on=("cat", "Cus_CardNo","index_copy"))
-    return df 
+    return df
 
 def add_past_time_period_dumm(df,t,col,dum_col): # col must be list
     df["index_copy"] = df.index # add copy of index that will be shifted by -t
     copy = df.copy()
     copy.index_copy = copy.index_copy - t # shifting index copy
-    copy = copy[[copy,dum_col,"cat", "Cus_CardNo","index_copy"]] # keep only target cols 
+    copy = copy[[copy,dum_col,"cat", "Cus_CardNo","index_copy"]] # keep only target cols
     dummies = pd.get_dummies(df[dum_col])
     dummies_cols = dummies.columns()
     copy = copy.merge(dummies,left_index=True, right_index=True)
     new_name = col+f'-{t}'
     copy = copy.rename({col:new_name},axis=1)
     df = df.merge(copy,how='left',right_on=("cat", "Cus_CardNo","index_copy"),left_on=("cat", "Cus_CardNo","index_copy"))
-    return df 
+    return df
 
+def normalize_col(x):
+    mean = x.mean()
+    std = x.std()
+    norm_x = (x-mean)/std
+    return norm_x
 
-def preprocess_df2(df,cat=False,qty=False):
+def preprocess_df2(df,cat=False,qty=False,scale="standard", scale_y=True):
     cols = ["cat","Cus_CardNo","gap"]
     past_cols = ["gap"]
     if cat:
@@ -160,8 +218,14 @@ def preprocess_df2(df,cat=False,qty=False):
     df = df[cols]
     df["y"] = df.gap
     df.dropna(inplace=True)
-    for col in past_cols:
-        df.loc[:,col] = preprocessing.scale(df[col])
+    if scale == "MinMax":
+        scaler = preprocessing.MinMaxScaler(feature_range=(0,1))
+    elif scale == "standard":
+        scaler = preprocessing.StandardScaler()
+    if scale != "None":
+        df.loc[:,past_cols] = scaler.fit_transform(df.loc[:,past_cols])
+    if scale_y:
+        df["y"] = df.gap
     df.dropna(inplace=True)
     for t in reversed(range (1,using_past+1)):
         df = add_past_time_period(df, t, past_cols)
@@ -171,26 +235,31 @@ def preprocess_df2(df,cat=False,qty=False):
     df = df.sample(frac = 1)
     return df
 
-def train_test_split(gap_df,df,frac=0.05):
+def train_test_split(df,frac=0.05):
+    gap_df = df.groupby(["cat", "Cus_CardNo"]).agg({"gap": [np.mean, np.median,'count','max']})
+    gap_df = gap_df.reset_index()
     test_ic = gap_df[["cat","Cus_CardNo"]].sample(frac=frac)
     train_ic = gap_df[["cat","Cus_CardNo"]].drop(test_ic.index, errors="ignore")
     test = df[(df.cat.isin(test_ic.cat)) & (df.Cus_CardNo.isin(test_ic.Cus_CardNo))]
     train = df[(df.cat.isin(train_ic.cat)) & (df.Cus_CardNo.isin(train_ic.Cus_CardNo))]
-    
+
     test = test.dropna()
     train = train.dropna()
     
-    test_x = test.drop(["cat", "Cus_CardNo",  "gap", "index_copy","qty_x","y"],axis=1)
-    train_x = train.drop(["cat", "Cus_CardNo",  "gap", "index_copy","qty_x","y"],axis=1)
-    
+
+    test_x = test.drop(["cat", "Cus_CardNo",  "gap", "index_copy","y"],axis=1)
+    train_x = train.drop(["cat", "Cus_CardNo",  "gap", "index_copy","y"],axis=1)
+    if "qty_x" in test.columns:
+        test_x = test_x.drop(["qty_x"],axis=1)
+        train_x = train_x.drop(["qty_x"],axis=1)
+        
+
     test_y = test["y"].to_numpy()
     train_y = train["y"].to_numpy()
 
     test_x_array = np.array(test_x.to_numpy().tolist()).astype('float32')
     train_x_array = np.array(train_x.to_numpy().tolist()).astype('float32')
-    
-    
-    
+
     return test_x_array, test_y, train_x_array, train_y
 
 def encoder_decoder(n_steps_in,n_features,n_steps_out):
@@ -224,28 +293,30 @@ def RNN(layers,n_steps,n_features,dropout=0.2,lr=0.00001):
             model.add(Bidirectional(LSTM(nodes, activation='relu', input_shape=(n_steps, n_features),return_sequences=True)))
         if dropout:
             model.add(Dropout(dropout))
-    
+
     model.add(Dense(1, activation='linear'))
-    opt = tf.keras.optimizers.Adam(lr=lr)
+    opt = tf.keras.optimizers.Adam(lr=lr,clipvalue=1)
     model.compile(loss='mean_squared_error', optimizer= opt, metrics=['mae'])
-    
+
     return model
 
 
 def outliers(df,col):
     # Select the first quantile
     q1 = df[col].quantile(.25)
-    
+
     # Select the third quantile
     q3 = df[col].quantile(.75)
-    
+
     iqr = q3-q1
-    
+
     lower_outliers = q1-(iqr*1.5)
     upper_outliers = q3+(iqr*1.5)
     return lower_outliers, upper_outliers
 
-def filter_outlier_custs(gap_df, df):
+def filter_outlier_custs( df):
+    gap_df = df.groupby(["cat", "Cus_CardNo"]).agg({"gap": [np.mean, np.median,'count','max']})
+    #gap_df = gap_df.reset_index()
     lower_outliers , upper_outliers = outliers(gap_df["gap"],"max")
     outlier_custs = gap_df[gap_df["gap"]["max"] > upper_outliers].index.get_level_values(1)
     df = df[~df.Cus_CardNo.isin(outlier_custs)]
@@ -260,7 +331,7 @@ def plot_loss_graph(history):
     plt.xlabel('epoch')
     plt.legend(['train', 'test'], loc='upper left')
     plt.show()
-    
+
 def test_model_with_future():
     df_future = pull_data(year=2021, start='2021-06-01', end ='2021-12-30')
     gap_df_future, df_future = create_gap_df(df_future)
@@ -274,7 +345,7 @@ def test_model_with_future():
     test_x_future = np.reshape(test_x_future.to_numpy(), (test_x_future.shape[0], test_x_future.shape[1], 1))
 
     #score = model.evaluate(test_x_future, test_y_future, verbose=0)
-    
+
     y_pred = model.predict(test_x_future)
 
     #r2 = r2_score(test_y_future, y_pred.flatten())
@@ -289,16 +360,11 @@ def limit_data(train_x, train_y, test_x, test_y, lim):
     test_y = test_y[:lim]
     return train_x, train_y, test_x, test_y
 
-def filter_cat_by_amount_cust(df, min_cust=20):
-    df_grouped = df.groupby("cat").nunique()
-    cats_to_keep = df_grouped[df_grouped.Cus_CardNo>20].index
-    df = df[df.cat.isin(cats_to_keep)]
-    return df
 
 # fixed paramaters
 predict_next = 1
 using_past = 25
-epochs = 500
+epochs = 100
 batch_size = 64
 name = f"predict-next-{predict_next}-using-{using_past}-at-{int(time.time())}"
 filter_outlier = False
@@ -312,33 +378,33 @@ if load_from_db:
     # removing blank category
     df = df[df.cat!='$  ']
     df.to_csv("cat_data.csv",index=False)
-    
+
 # Loads data from csv
 else:
     df = pd.read_csv("cat_data.csv",parse_dates=["Pos_TimeDate"])
 
 df = filter_cat_by_amount_cust(df,20)
 
-gap_df, df = create_gap_df(df)
+# filter for one cat
+topCat = df.cat.value_counts().index[1]
+#df = df[df.cat==topCat]
 
-#df = filter_outlier_custs(gap_df,df)
+df = create_gap_df(df)
 
-df_merge = df.merge(gap_df, how="left",left_on=["cat","Cus_CardNo"],right_on=["cat","Cus_CardNo"])
+df = filter_outlier_custs(df)
 
-gap_df = gap_df.reset_index()
+df = preprocess_df2(df,cat=False,qty=True,scale="standard",scale_y=True)
 
-df = preprocess_df2(df,qty=True)
-
-test_x_array, test_y, train_x_array, train_y = train_test_split(gap_df,df)
+test_x_array, test_y, train_x_array, train_y = train_test_split(df)
 
 #model = simple_RNN(using_past,2)
 
-model = RNN([20,20,20,20,20,20,20],using_past,2,dropout=0.2,lr=0.0001)
+model = RNN([500,500],using_past,2,dropout=None,lr=0.0001)
 
-history = model.fit(train_x_array, 
-                    train_y, 
-                    epochs=epochs, 
-                    batch_size=batch_size, 
+history = model.fit(train_x_array,
+                    train_y,
+                    epochs=epochs,
+                    batch_size=batch_size,
                     verbose=1,
                     validation_data=(test_x_array, test_y)
                     )
@@ -347,5 +413,6 @@ plot_loss_graph(history)
 y_pred = model.predict(train_x_array)
 
 plt.scatter(train_y,y_pred)
+#plt.plot(train_y,train_y,color="red")
 
-
+print(r2_score(train_y,y_pred))
