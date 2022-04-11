@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu Jan 20 11:03:53 2022
+Created on Mon Apr 11 08:56:15 2022
 
 @author: alexp
 """
+
+
 
 
 import sys
@@ -159,7 +161,7 @@ def create_gap_df(df):
     return new_df
 
 
-def add_past_time_period(df,t,cols):
+def add_past_time_period(df,t,cols,qty=False):
     '''
     Adds a column to df. This column contains a list of factors from time period [current_date - t]
     This is done using the same method as add_gap: copy df, shift index by -t, add cols data from that 
@@ -183,7 +185,9 @@ def add_past_time_period(df,t,cols):
     copy.index_copy = copy.index_copy - t # shifting index copy
     columns = cols + ["cat", "Cus_CardNo","index_copy"]
     copy = copy[columns] # keep only target cols
-    copy[t] = list(copy[cols].values)
+    copy[t] = copy["gap"]
+    if qty:
+        copy[f"qty{t}"] = copy["qty_x"]
     copy = copy.drop(columns=cols)
     df = df.merge(copy,how='left',right_on=("cat", "Cus_CardNo","index_copy"),left_on=("cat", "Cus_CardNo","index_copy"))
     return df
@@ -372,23 +376,7 @@ def limit_data(train_x, train_y, test_x, test_y, lim):
     test_y = test_y[:lim]
     return train_x, train_y, test_x, test_y
 
-def RNN_simple2(time_step):
-    from tensorflow.keras import Input 
-    from tensorflow.keras.layers import Dense, SimpleRNN # for creating regular densely-connected NN layers and RNN layers
 
-    model = Sequential(name="First-RNN-Model") # Model
-    model.add(Input(shape=(time_step,2), name='Input-Layer')) # Input Layer - need to speicfy the shape of inputs
-    model.add(SimpleRNN(units=100, activation='tanh', name='Hidden-Recurrent-Layer')) # Hidden Recurrent Layer, Tanh(x) = sinh(x)/cosh(x) = ((exp(x) - exp(-x))/(exp(x) + exp(-x)))
-    model.add(Dense(units=1, activation='tanh', name='Hidden-Layer')) # Hidden Layer, Tanh(x) = sinh(x)/cosh(x) = ((exp(x) - exp(-x))/(exp(x) + exp(-x)))
-    model.add(Dense(units=1, activation='linear', name='Output-Layer')) # Output Layer, Linear(x) = x
-    model.compile(optimizer='adam', # default='rmsprop', an algorithm to be used in backpropagation
-                  loss='mean_squared_error', # Loss function to be optimized. A string (name of loss function), or a tf.keras.losses.Loss instance.
-                  metrics=['MeanSquaredError', 'MeanAbsoluteError'], # List of metrics to be evaluated by the model during training and testing. Each of this can be a string (name of a built-in function), function or a tf.keras.metrics.Metric instance. 
-                  loss_weights=None, # default=None, Optional list or dictionary specifying scalar coefficients (Python floats) to weight the loss contributions of different model outputs.
-                  weighted_metrics=None, # default=None, List of metrics to be evaluated and weighted by sample_weight or class_weight during training and testing.
-                  run_eagerly=None, # Defaults to False. If True, this Model's logic will not be wrapped in a tf.function. Recommended to leave this as None unless your Model cannot be run inside a tf.function.
-                 )
-    return model
 # fixed paramaters
 predict_next = 1
 using_past = 25
@@ -396,13 +384,13 @@ epochs = 100
 batch_size = 64
 name = f"predict-next-{predict_next}-using-{using_past}-at-{int(time.time())}"
 filter_outlier = False
-load_from_db = False
+load_from_db = True
 ########
 
 
 # loads data from alphamega database
 if load_from_db:
-    df = pull_data(year=2021, start='2021-01-01', end ='2021-03-30')
+    df = pull_data(year=2018, start='2018-01-01', end ='2018-03-30')
     # removing blank category
     df = df[df.cat!='$  ']
     df.to_csv("cat_data.csv",index=False)
@@ -421,31 +409,45 @@ df = create_gap_df(df)
 
 df = filter_outlier_custs(df)
 
-df = preprocess_df2(df,cat=False,qty=True,scale="standard",scale_y=False)
+df = preprocess_df2(df,cat=False,qty=True,scale="None",scale_y=False)
 
 
 test_x_array, test_y, train_x_array, train_y = train_test_split(df)
 
-train_x_array = train_x_array[:]
-train_y = train_y[:]
+model = RandomForestRegressor(oob_score=True,max_features=None)
 
-#model = simple_RNN(using_past,2)
+model.fit(train_x_array, train_y)
 
-model = RNN([5000],using_past,2,dropout=None,lr=0.0001)
 
-#model = RNN_simple2(using_past)
-history = model.fit(train_x_array,
-                    train_y,
-                    epochs=epochs,
-                    batch_size=batch_size,
-                    verbose=1,
-                    validation_data=(test_x_array, test_y)
-                    )
-plot_loss_graph(history)
+model.score(test_x_array, test_y)
 
-y_pred = model.predict(train_x_array)
 
-plt.scatter(train_y,y_pred)
-#plt.plot(train_y,train_y,color="red")
+test_pred = model.predict(test_x_array)
+train_pred = model.predict(train_x_array)
 
-print(r2_score(train_y,y_pred))
+plt.plot(train_y,train_y)
+plt.scatter(train_y,train_pred)
+plt.show()
+
+plt.plot(test_y,test_y)
+plt.scatter(test_y,test_pred)
+plt.show()
+
+r2_score(train_y, train_pred)
+r2_score(test_y, test_pred)
+
+
+df_future =  pull_data(year=2019, start='2019-01-01', end ='2019-03-30')
+df_future = df_future[df_future.cat!='$  ']
+df_future = create_gap_df(df_future)
+
+df_future = filter_outlier_custs(df_future)
+df_future = preprocess_df2(df_future,cat=False,qty=True,scale="None",scale_y=False)
+test_x_future, test_y_future, train_x_future, train_y_future = train_test_split(df_future)
+future_pred = model.predict(train_x_future)
+r2_score(train_y_future, future_pred)
+plt.scatter(train_y_future,future_pred)
+
+
+
+
