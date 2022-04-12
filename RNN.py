@@ -113,6 +113,33 @@ def filter_cat_by_amount_cust(df, min_cust=20):
     df = df[df.cat.isin(cats_to_keep)]
     return df
 
+def filter_cat_by_amount_cust(df, min_cust=10):
+    '''
+    Filters out categories where the number of customers is less than
+    the min_cust.
+
+    Parameters
+    ----------
+    df : Pandas Dataframe
+        Data frame with cat and customers columns.
+    min_cust : TYPE, optional
+        The min number of customers who purchased each category. The default is 20.
+
+    Returns
+    -------
+    df : Pandas Dataframe
+        Same Dataframe as input but with only cats with enough customer purchases
+
+    '''
+    # groups the dataframe by cat and gets the unique count of other columns
+    df_grouped = df.groupby(["Cus_CardNo","cat"]).nunique()
+    df_grouped = df_grouped.reset_index()
+    # filters the group df by the min_cust and save the index of cat ids
+    cats_to_keep = df_grouped[df_grouped.Pos_TimeDate>min_cust]
+    # filter the main df using the cats_to_keep
+    df = cats_to_keep[["Cus_CardNo","cat"]].merge(df,how="left",left_on=["Cus_CardNo","cat"],right_on=["Cus_CardNo","cat"])
+    return df
+
 
 def create_gap_df(df):
     '''
@@ -238,15 +265,14 @@ def preprocess_df2(df,cat=False,qty=False,scale="standard", scale_y=True):
 def train_test_split(df,frac=0.05):
     gap_df = df.groupby(["cat", "Cus_CardNo"]).agg({"gap": [np.mean, np.median,'count','max']})
     gap_df = gap_df.reset_index()
-    test_ic = gap_df[["cat","Cus_CardNo"]].sample(frac=frac)
-    train_ic = gap_df[["cat","Cus_CardNo"]].drop(test_ic.index, errors="ignore")
-    test = df[(df.cat.isin(test_ic.cat)) & (df.Cus_CardNo.isin(test_ic.Cus_CardNo))]
-    train = df[(df.cat.isin(train_ic.cat)) & (df.Cus_CardNo.isin(train_ic.Cus_CardNo))]
+    test_ic = gap_df[["Cus_CardNo"]].sample(frac=frac)
+    
+    test = df[df.Cus_CardNo.isin(test_ic.Cus_CardNo)]
+    train = df[~df.Cus_CardNo.isin(test_ic.Cus_CardNo)]
 
     test = test.dropna()
     train = train.dropna()
     
-
     test_x = test.drop(["cat", "Cus_CardNo",  "gap", "index_copy","y"],axis=1)
     train_x = train.drop(["cat", "Cus_CardNo",  "gap", "index_copy","y"],axis=1)
     if "qty_x" in test.columns:
@@ -391,7 +417,7 @@ def RNN_simple2(time_step):
     return model
 # fixed paramaters
 predict_next = 1
-using_past = 25
+using_past = 10
 epochs = 100
 batch_size = 64
 name = f"predict-next-{predict_next}-using-{using_past}-at-{int(time.time())}"
@@ -411,7 +437,7 @@ if load_from_db:
 else:
     df = pd.read_csv("cat_data.csv",parse_dates=["Pos_TimeDate"])
 
-df = filter_cat_by_amount_cust(df,20)
+df = filter_cat_by_amount_cust(df,10)
 
 # filter for one cat
 topCat = df.cat.value_counts().index[1]
@@ -431,7 +457,7 @@ train_y = train_y[:]
 
 #model = simple_RNN(using_past,2)
 
-model = RNN([5000],using_past,2,dropout=None,lr=0.0001)
+model = RNN([100],using_past,2,dropout=None,lr=0.0001)
 
 #model = RNN_simple2(using_past)
 history = model.fit(train_x_array,
@@ -443,9 +469,9 @@ history = model.fit(train_x_array,
                     )
 plot_loss_graph(history)
 
-y_pred = model.predict(train_x_array)
+y_pred = model.predict(test_x_array)
 
-plt.scatter(train_y,y_pred)
+plt.scatter(test_y,y_pred)
 #plt.plot(train_y,train_y,color="red")
 
-print(r2_score(train_y,y_pred))
+print(r2_score(test_y,y_pred))
