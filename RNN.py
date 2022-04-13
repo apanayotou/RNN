@@ -457,7 +457,7 @@ train_y = train_y[:]
 
 #model = simple_RNN(using_past,2)
 
-model = RNN([100],using_past,2,dropout=None,lr=0.0001)
+model = RNN([300],using_past,2,dropout=None,lr=0.0001)
 
 #model = RNN_simple2(using_past)
 history = model.fit(train_x_array,
@@ -469,9 +469,9 @@ history = model.fit(train_x_array,
                     )
 plot_loss_graph(history)
 
-y_pred = model.predict(test_x_array)
+y_pred = model.predict(train_x_array)
 
-plt.scatter(test_y,y_pred)
+plt.scatter(train_y,y_pred)
 #plt.plot(train_y,train_y,color="red")
 
-print(r2_score(test_y,y_pred))
+print(r2_score(train_y,y_pred))

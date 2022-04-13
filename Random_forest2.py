@@ -242,15 +242,14 @@ def preprocess_df2(df,cat=False,qty=False,scale="standard", scale_y=True):
 def train_test_split(df,frac=0.05):
     gap_df = df.groupby(["cat", "Cus_CardNo"]).agg({"gap": [np.mean, np.median,'count','max']})
     gap_df = gap_df.reset_index()
-    test_ic = gap_df[["cat","Cus_CardNo"]].sample(frac=frac)
-    train_ic = gap_df[["cat","Cus_CardNo"]].drop(test_ic.index, errors="ignore")
-    test = df[(df.cat.isin(test_ic.cat)) & (df.Cus_CardNo.isin(test_ic.Cus_CardNo))]
-    train = df[(df.cat.isin(train_ic.cat)) & (df.Cus_CardNo.isin(train_ic.Cus_CardNo))]
+    test_ic = gap_df[["Cus_CardNo"]].sample(frac=frac)
+    
+    test = df[df.Cus_CardNo.isin(test_ic.Cus_CardNo)]
+    train = df[~df.Cus_CardNo.isin(test_ic.Cus_CardNo)]
 
     test = test.dropna()
     train = train.dropna()
     
-
     test_x = test.drop(["cat", "Cus_CardNo",  "gap", "index_copy","y"],axis=1)
     train_x = train.drop(["cat", "Cus_CardNo",  "gap", "index_copy","y"],axis=1)
     if "qty_x" in test.columns:
@@ -379,7 +378,7 @@ def limit_data(train_x, train_y, test_x, test_y, lim):
 
 # fixed paramaters
 predict_next = 1
-using_past = 25
+using_past = 15
 epochs = 100
 batch_size = 64
 name = f"predict-next-{predict_next}-using-{using_past}-at-{int(time.time())}"
