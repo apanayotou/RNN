@@ -8,6 +8,7 @@ Created on Thu Jan 20 11:03:53 2022
 import sys
 import pandas as pd
 import numpy as np
+from sklearn.model_selection import train_test_split
 
 from sklearn import preprocessing
 from matplotlib import pyplot as plt
@@ -195,7 +196,7 @@ def add_past_time_period(df, t, cols, value_list=True):
     return df
 
 
-def preprocess_df(df, past_cols=["gap","qty"], scale_cols=["gap","qty"] scale="standard", scale_y=True, value_list=True, scaler=None):
+def preprocess_df(df, past_cols=["gap","qty"], scale_cols=["gap","qty"], scale="standard", scale_y=True, value_list=True, scaler=None):
     """
     Function that contains all preprocessing steps for the dataframe.
 
@@ -243,7 +244,7 @@ def preprocess_df(df, past_cols=["gap","qty"], scale_cols=["gap","qty"] scale="s
             scaler = preprocessing.StandardScaler()
     # Scale input features if scale is not None
     if scale != "None":
-        df.loc[:, past_cols] = scaler.fit_transform(df.loc[:, past_cols])
+        df.loc[:, scale_cols] = scaler.fit_transform(df.loc[:, scale_cols])
     # Scale target if scale_y is True
     if scale_y:
         df["y"] = df.gap
@@ -267,13 +268,16 @@ def x_y_split(df):
     df = df.dropna()
     x = df.drop(["cat", "Cus_CardNo", "gap", "index_copy", "y", "Pos_TimeDate"], axis=1)
 
-    if "qty_x" in x.columns:
-        x = x.drop(["qty_x"], axis=1)
+    if "qty" in x.columns:
+        x = x.drop(["qty"], axis=1)
 
     y = df["y"].to_numpy()
-    x = np.array(x.to_numpy().tolist()).astype('float32')
+
     return x, y
 
+def x_to_array(x):
+    x = np.array(x.to_numpy().tolist()).astype('float32')
+    return x
 
 def df_date_to_month_weekday(df):
     month = df.Pos_TimeDate.dt.month
@@ -290,13 +294,10 @@ predict_next = 1
 using_past = 10
 epochs = 100
 batch_size = 64
-
-filter_outlier = False
-load_from_db = True
 ########
 year = 2017
 month1 = "01"
-month2 = "06"
+month2 = "12"
 
 print(f"Pulling {month1} to {month2} of {year} data")
 df = pull_data(year=year, start=f'{year}-{month1}-01', end=f'{year}-{month2}-30')
@@ -305,17 +306,17 @@ df = df[df.cat != '$  ']
 print("adding gap")
 df = create_gap_df(df)
 df = df_date_to_month_weekday(df)
-print("preprocessing")
-df, scaler = preprocess_df(df, scale="standard", scale_y=False, value_list=True, past_cols=["gap","qty","month_sine","weekday_sine","month_cos","weekday_cos"])
-
-print("splitting")
-'''
-print("splitting x and y")
-x, y = x_y_split(df)
+y = df["gap"]
+X = df
+X_test, X_train, y_test, y_train = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, scaler = preprocess_df(X_train, scale="standard", scale_y=False, value_list=True, past_cols=["gap","qty","month_sine","weekday_sine","month_cos","weekday_cos"])
+X_test, _ = preprocess_df(X_test, scale="standard", scale_y=False, value_list=True, past_cols=["gap","qty","month_sine","weekday_sine","month_cos","weekday_cos"], scaler=scaler)
+X_test = x_to_array(X_test)
+X_train = x_to_array(X_train)
+y_test = y_test.to_numpy()
+y_train = y_train.to_numpy()
 print("saving x and y")
-np.save(f"data/X_{year}_{month1}_to_{month2}.npy", x)
-np.save(f"data/y_{year}_{month1}_to_{month2}.npy", y)
-x = []
-y = []
-df = []
-'''
+np.save("data/X_train.npy", X_train)
+np.save("data/X_test.npy", X_test)
+np.save("data/y_train.npy", y_train)
+np.save("data/y_test.npy", y_test)
