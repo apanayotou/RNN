@@ -196,7 +196,8 @@ def add_past_time_period(df, t, cols, value_list=True):
     return df
 
 
-def preprocess_df(df, past_cols=["gap","qty"], scale_cols=["gap","qty"], scale="standard", scale_y=True, value_list=True, scaler=None):
+def preprocess_df(df, past_cols=["gap", "qty"], scale_cols=["gap", "qty"], scale="standard", scale_y=True,
+                  value_list=True, scaler=None):
     """
     Function that contains all preprocessing steps for the dataframe.
 
@@ -230,7 +231,7 @@ def preprocess_df(df, past_cols=["gap","qty"], scale_cols=["gap","qty"], scale="
         Dataframe with preprocessed data.
     """
     # list of columns we want to keep
-    cols = ["cat", "Cus_CardNo","Pos_TimeDate"]+past_cols
+    cols = ["cat", "Cus_CardNo", "Pos_TimeDate"] + past_cols
     # keep only columns we want to use
     df = df[cols]
     # creates separate column for target we want to predict (next gap).
@@ -240,11 +241,13 @@ def preprocess_df(df, past_cols=["gap","qty"], scale_cols=["gap","qty"], scale="
     if not scaler:
         if scale == "MinMax":
             scaler = preprocessing.MinMaxScaler(feature_range=(0, 1))
+            scaler.fit(df[scale_cols])
         elif scale == "standard":
             scaler = preprocessing.StandardScaler()
+            scaler.fit(df[scale_cols])
     # Scale input features if scale is not None
     if scale != "None":
-        df.loc[:, scale_cols] = scaler.fit_transform(df.loc[:, scale_cols])
+        df.loc[:, scale_cols] = scaler.transform(df.loc[:, scale_cols])
     # Scale target if scale_y is True
     if scale_y:
         df["y"] = df.gap
@@ -261,12 +264,12 @@ def preprocess_df(df, past_cols=["gap","qty"], scale_cols=["gap","qty"], scale="
     df = df.merge(grouped, how='inner', on=["cat", "Cus_CardNo", "Pos_TimeDate"])
     # shuffle dataframe
     df = df.sample(frac=1)
-    return df, scaler
+    return df
 
 
 def x_y_split(df):
     df = df.dropna()
-    x = df.drop(["cat", "Cus_CardNo", "gap", "index_copy", "y", "Pos_TimeDate"], axis=1)
+    x = df.drop(["cat", "Cus_CardNo", "gap", "index_copy", "y", "Pos_TimeDate","month_sine", "month_cos", "weekday_sine", "weekday_cos"], axis=1)
 
     if "qty" in x.columns:
         x = x.drop(["qty"], axis=1)
@@ -275,9 +278,11 @@ def x_y_split(df):
 
     return x, y
 
+
 def x_to_array(x):
     x = np.array(x.to_numpy().tolist()).astype('float32')
     return x
+
 
 def df_date_to_month_weekday(df):
     month = df.Pos_TimeDate.dt.month
@@ -288,6 +293,13 @@ def df_date_to_month_weekday(df):
     df["weekday_cos"] = np.cos(weekday / 7 * 2 * np.pi)
     return df
 
+def scale_train_test(train,test, cols=[0,1], scaler=preprocessing.StandardScaler):
+    scaler = scaler()
+    for col in cols:
+        scaler.fit(train[:, :, col])
+        train[:, :, col] = scaler.transform(train[:, :, col])
+        test[:, :, col] = scaler.transform(test[:, :, col])
+    return train, test
 
 # fixed paramaters
 predict_next = 1
@@ -295,28 +307,30 @@ using_past = 10
 epochs = 100
 batch_size = 64
 ########
-year = 2017
+year = 2018
 month1 = "01"
-month2 = "12"
+month2 = "03"
 
 print(f"Pulling {month1} to {month2} of {year} data")
-df = pull_data(year=year, start=f'{year}-{month1}-01', end=f'{year}-{month2}-30')
+df = pull_data(year=year, start=f'{year}-{month1}-01', end=f'{year+1}-{month2}-30')
 # removing blank category
 df = df[df.cat != '$  ']
 print("adding gap")
 df = create_gap_df(df)
 df = df_date_to_month_weekday(df)
-y = df["gap"]
-X = df
-X_test, X_train, y_test, y_train = train_test_split(X, y, test_size=0.2, random_state=42)
-X_train, scaler = preprocess_df(X_train, scale="standard", scale_y=False, value_list=True, past_cols=["gap","qty","month_sine","weekday_sine","month_cos","weekday_cos"])
-X_test, _ = preprocess_df(X_test, scale="standard", scale_y=False, value_list=True, past_cols=["gap","qty","month_sine","weekday_sine","month_cos","weekday_cos"], scaler=scaler)
-X_test = x_to_array(X_test)
-X_train = x_to_array(X_train)
-y_test = y_test.to_numpy()
-y_train = y_train.to_numpy()
+df = preprocess_df(df,
+                   scale="None",
+                   scale_y=False,
+                   value_list=True,
+                   past_cols=["gap", "qty", "month_sine", "weekday_sine", "month_cos", "weekday_cos"])
+x, y = x_y_split(df)
+x = x_to_array(x)
+train_x, test_x, train_y, test_y = train_test_split(x, y, test_size=0.2, random_state=42)
+
+train_x, test_x = scale_train_test(train_x, test_x)
+
 print("saving x and y")
-np.save("data/X_train.npy", X_train)
-np.save("data/X_test.npy", X_test)
-np.save("data/y_train.npy", y_train)
-np.save("data/y_test.npy", y_test)
+np.save("data/X_train.npy", train_x)
+np.save("data/X_test.npy", test_x)
+np.save("data/y_train.npy", train_y)
+np.save("data/y_test.npy", test_y)
